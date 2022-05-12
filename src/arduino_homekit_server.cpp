@@ -524,6 +524,10 @@ void write(client_context_t *context, byte *data, int data_size) {
 		CLIENT_ERROR(context, "The socket is null! (or is closed)");
 		return;
 	}
+	if (context->disconnect) {
+		context->error_write = true;
+		return;
+	}
 	if (context->error_write) {
 		CLIENT_ERROR(context, "Abort write data since error_write.");
 		return;
@@ -531,20 +535,10 @@ void write(client_context_t *context, byte *data, int data_size) {
 	int write_size = context->socket->write(data, data_size);
 	CLIENT_DEBUG(context, "Sending data of size %d", data_size);
 	if (write_size != data_size) {
-		CLIENT_ERROR(context, "socket.write, data_size=%d, write_size=%d", data_size, write_size);
 		context->error_write = true;
-		// Error write when :
-		// 1. remote client is disconnected
-		// 2. data_size is larger than the tcp internal send buffer
-		// But We has limited the data_size to 538, and TCP_SND_BUF = 1072. (See the comments on HOMEKIT_JSONBUFFER_SIZE)
-		// So we believe here is disconnected.
-		context->disconnect = true;
-		homekit_server_close_client(context->server, context);
-		// We consider the socket is 'closed' when error in writing (eg. the remote client is disconnected, NO tcp ack receive).
-		// Closing the socket causes memory-leak if some data has not been sent (the write_buffer did not free)
-		// To fix this memory-leak, add tcp_abandon(_pcb, 0); in ClientContext.h of ESP8266WiFi-library.
+		context->socket->keepAlive(1, 1, 1);		// fast disconnected internally in 1 second.
+		CLIENT_ERROR(context, "socket.write, data_size=%d, write_size=%d", data_size, write_size);
 	}
-
 }
 
 int client_send_encrypted_(client_context_t *context,
